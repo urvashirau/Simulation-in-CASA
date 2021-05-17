@@ -26,7 +26,7 @@ from astropy.wcs import WCS
 
 # Import required tools/tasks
 from casatools import simulator, image, table, coordsys, measures, componentlist, quanta, ctsys, ms, vpmanager
-from casatasks import tclean, ft, imhead, listobs, exportfits, flagdata, bandpass, applycal,imstat, visstat,mstransform, imsmooth
+from casatasks import tclean, ft, imhead, listobs, exportfits, flagdata, bandpass, applycal,imstat, visstat,mstransform, imsmooth,widebandpbcor
 from casatasks.private import simutil
 
 from IPython.display import Markdown as md

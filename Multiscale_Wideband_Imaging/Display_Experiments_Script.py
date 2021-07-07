@@ -414,3 +414,53 @@ def XPlot(vis='sim_data_ALMA.ms',ptype='amp-time',forceconvert=False):
             pl.annotate('   '+txt, (gxdat['ANT_XPOS'].values[i], gxdat['ANT_YPOS'].values[i]),fontsize=12,color=col)   
         pl.title('Antenna Positions');
 
+
+###################################################
+###################################################
+##### Plots from tclean return dictionary
+###################################################
+def PlotConvergence(recfile=''):
+    
+    summ = np.load(recfile,allow_pickle='TRUE').item()
+    
+    minarr = summ['summaryminor']
+    
+    ## Iteration numbers at which the status was recorded
+    iters= minarr[0,:]
+    ## Peak residual in the whole image
+    peaks=minarr[1,:]
+    ## Peak residual within the clean mask
+    peaks_in_mask= minarr[1,:]
+    ## Total model flux
+    fluxes = minarr[2,:] 
+    ## Cyclethreshold : This is the threshold at which the next major cycle is triggered
+    #cycthreshes = minarr[3,:]
+    ## Deconvolver id : This differs from 0 if you're doing multi-field imaging using the 'outlierfile' parameter of tclean.
+    #decids = minarr[4:0]
+    ## Channel / Stokes ID. The indexing may get messy with both dimensions turned on, but for channel, it will work right now. 
+    planes = minarr[5,:]
+    
+    ## A list of iteration numbers at which major cycles happened.  
+    majcycle = summ['summarymajor']
+    
+    pl.figure(figsize=(9,4))
+    pl.clf()
+    ax1 = pl.subplot(121)
+    pl.title('Peak Residual')
+    ax2 = pl.subplot(122)
+    pl.title('Total Flux')
+    plane_ids = np.unique(planes)
+    for plane_id in plane_ids: # [0:1]:
+        
+        sel_iters = iters[planes==plane_id]
+        sel_fluxes = fluxes[planes==plane_id]
+        sel_peaks = peaks[planes==plane_id]
+        
+        ax1.plot(sel_iters, sel_peaks,'r.-')
+        for it in majcycle:
+            ax1.vlines(x=[it,it], ymin=0, ymax=np.max(sel_peaks),linestyles='dashed')
+            
+        ax2.plot(sel_iters, sel_fluxes,'g.-')
+        for it in majcycle:
+            ax2.vlines(x=[it,it], ymin=0, ymax=np.max(sel_fluxes),linestyles='dashed')
+

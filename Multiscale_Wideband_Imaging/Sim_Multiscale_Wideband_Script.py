@@ -653,3 +653,31 @@ def fit_spectrum(cubename='', intensity='', alpha='', beta='', pixt=0.1):
     ia.fromarray(outfile=beta, pixels=beta_arr, csys=csys.torecord(),overwrite=True)
 
 ###################################################################################
+
+
+def calcImageAccuracy( truthimage='', outputimage=''):
+    print("Calculate image fidelity metrics to compare truth and reconstructed images")
+
+    ia.open(truthimage)
+    shp = ia.shape()
+    ia.close()
+    print("Shape:"+str(shp))
+
+    for chan in range(0,1): ## shp[3]):
+        ia.open(truthimage)
+        imtrue = ia.getchunk(blc=[0,0,0,chan],trc=[shp[0],shp[1],0,chan])
+        ia.close()
+        ia.open(outputimage)
+        imout = ia.getchunk(blc=[0,0,0,chan],trc=[shp[0],shp[1],0,chan])
+        ia.close()
+
+        tmax = np.max(imtrue)
+
+        imdiff = (imtrue - imout)/tmax
+
+    pl.figure(figsize=(4,4))
+    pl.clf()
+    pl.subplot(111)
+    pl.imshow(imdiff[:,:,0,0].transpose(),origin='lower',interpolation=None,cmap='jet')     
+    pl.colorbar()
+    pl.title('Relative Difference between\n true and output images')

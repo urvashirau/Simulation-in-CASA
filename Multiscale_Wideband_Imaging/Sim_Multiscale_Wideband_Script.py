@@ -616,7 +616,7 @@ def fit_spectrum(cubename='', intensity='', alpha='', beta='', pixt=0.1):
     csys = ia.coordsys()
     shp = ia.shape()
     ia.close()
-    print('Cube shape : ',shp)
+    #print('Cube shape : ',shp)
 
     nu = np.array(getFreqList(cubename))/1e+9
     print('Frequencies (Ghz) : ',nu)
@@ -656,12 +656,17 @@ def fit_spectrum(cubename='', intensity='', alpha='', beta='', pixt=0.1):
 
 
 def calcImageAccuracy( truthimage='', outputimage=''):
-    print("Calculate image fidelity metrics to compare truth and reconstructed images")
+    '''
+    Calculate image fidelity metrics to compare truth and reconstructed images
+
+    truthimage : Model image convolved with a beam that represents the desired target resolution.
+    outputimage : Restored image, convolved to the same target resoution as truthimage.
+    '''
 
     ia.open(truthimage)
     shp = ia.shape()
     ia.close()
-    print("Shape:"+str(shp))
+    #print("Shape:"+str(shp))
 
     for chan in range(0,1): ## shp[3]):
         ia.open(truthimage)
@@ -673,11 +678,18 @@ def calcImageAccuracy( truthimage='', outputimage=''):
 
         tmax = np.max(imtrue)
 
+        ## Relative Error. This is also the inverse of the formal definition of "imaging fidelity"
         imdiff = (imtrue - imout)/tmax
 
-    pl.figure(figsize=(4,4))
-    pl.clf()
-    pl.subplot(111)
-    pl.imshow(imdiff[:,:,0,0].transpose(),origin='lower',interpolation=None,cmap='jet')     
-    pl.colorbar()
-    pl.title('Relative Difference between\n true and output images')
+        ## Chi-square
+        chisq = np.sqrt(np.mean((imtrue - imout)**2))
+        
+
+        pl.figure(figsize=(4,4))
+        pl.clf()
+        pl.subplot(111)
+        pl.imshow(imdiff[:,:,0,0].transpose(),origin='lower',interpolation=None,cmap='jet')#,vmin=-0.005, vmax=+0.005)     
+        pl.colorbar()
+        pl.title('Relative Difference between\n true and output images')
+
+        print("Standard deviation of diff (chan %d) = %3.6f."%(chan, chisq))

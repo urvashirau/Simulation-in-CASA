@@ -28,7 +28,7 @@ To run the Demo notebook as is, we need
   ./local_python3/bin/pip install matplotlib astropy
 ```
 ### Installing casa6 from local pip wheels
-   Download the latest pip wheels for casatools and casatasks from the JIRA ticket (Currently wheels have been obtained from builds in CAS-13438). 
+   Download the latest pip wheels for casatools and casatasks from the JIRA ticket (Currently wheels have been obtained from build "dev19" on CAS-940). 
 ```
   ./local_python3/bin/pip install casatools_xxxxxx.whl
   ./local_python3/bin/pip install casatasks_xxxxxx.whl 

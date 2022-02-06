@@ -336,7 +336,7 @@ def msToZarr(vis='sim_data_ALMA.ms'):
     convert_ms(vis, vis+'.zarr')
     
 
-def XPlot(vis='sim_data_ALMA.ms',ptype='amp-time',forceconvert=False):
+def XPlot(vis='sim_data_ALMA.ms',ptype='amp-time',forceconvert=False,tel_name='ALMA'):
     """
     Make a few types of plots
     Supported types : amp-time, amp-freq, uvcov, plotants
@@ -347,19 +347,107 @@ def XPlot(vis='sim_data_ALMA.ms',ptype='amp-time',forceconvert=False):
     if not os.path.exists(zvis) or forceconvert==True:
         msToZarr(vis=vis)
         
-    xdat = dio.read_vis(zvis,ddi=0)
-    gxdat = dio.read_vis(zvis,ddi='global')
+    xds = dio.read_vis(zvis)
+    xdat = xds.xds0
+    #print(xds)
+    #print(xdat)
+    #print(xds.ANTENNA)
+    gxdat = xds.ANTENNA
+    
+    ant_names = gxdat.NAME.values
+    xdat['field'] = xdat.FIELD_ID[:,0]
+    
+    
     xdat['DMAG'] = ((xdat['DATA'].real ** 2 + xdat['DATA'].imag ** 2) ** 0.5).mean(axis=3)
     xdat['U'] = xdat['UVW'][:,:,0]
     xdat['V'] = xdat['UVW'][:,:,1]
     xdat['-U'] = -xdat['UVW'][:,:,0]
     xdat['-V'] = -xdat['UVW'][:,:,1]
     
-    ant_dias = np.unique(gxdat.ANT_DISH_DIAMETER)
+    ant_dias = np.unique(gxdat.DISH_DIAMETER)
 
-    xAA = xdat.where( (gxdat.ANT_DISH_DIAMETER[xdat.antennas[:,0]] == ant_dias[0])  &  (gxdat.ANT_DISH_DIAMETER[xdat.antennas[:,1]] == ant_dias[0])  )
-    xBB = xdat.where(  (gxdat.ANT_DISH_DIAMETER[xdat.antennas[:,0]] == ant_dias[1])  &  (gxdat.ANT_DISH_DIAMETER[xdat.antennas[:,1]] == ant_dias[1])  )
-    xAB = xdat.where( ( (gxdat.ANT_DISH_DIAMETER[xdat.antennas[:,0]] == ant_dias[0])  &  (gxdat.ANT_DISH_DIAMETER[xdat.antennas[:,1]] == ant_dias[1]) | (gxdat.ANT_DISH_DIAMETER[xdat.antennas[:,0]] == ant_dias[1])  &  (gxdat.ANT_DISH_DIAMETER[xdat.antennas[:,1]] == ant_dias[0]) ) )
+    xAA = xdat.where( (gxdat.DISH_DIAMETER[xdat.ANTENNA1] == ant_dias[0])  &  (gxdat.DISH_DIAMETER[xdat.ANTENNA2] == ant_dias[0])  )
+    xBB = xdat.where(  (gxdat.DISH_DIAMETER[xdat.ANTENNA1] == ant_dias[1])  &  (gxdat.DISH_DIAMETER[xdat.ANTENNA2] == ant_dias[1])  )
+    xAB = xdat.where( ( (gxdat.DISH_DIAMETER[xdat.ANTENNA1] == ant_dias[0])  &  (gxdat.DISH_DIAMETER[xdat.ANTENNA2] == ant_dias[1]) | (gxdat.DISH_DIAMETER[xdat.ANTENNA1] == ant_dias[1])  &  (gxdat.DISH_DIAMETER[xdat.ANTENNA2] == ant_dias[0]) ) )
+
+
+    if ptype == 'amp-time':
+        fig, axes = pl.subplots(ncols=1,figsize=(9,3))
+        for fld in np.unique(xdat.field):
+            xAA.where(xAA.field==fld).plot.scatter(x='time',y='DMAG',  marker='.', color='r',alpha=0.1,label='A-A')
+            xAB.where(xAB.field==fld).plot.scatter(x='time',y='DMAG',  marker='.', color='m',alpha=0.1,label='A-B')
+            xBB.where(xBB.field==fld).plot.scatter(x='time',y='DMAG',  marker='.', color='b',alpha=0.1,label='B-B')
+            
+        pl.title('Visibility ampllitude : Red (A-A), Blue (B-B), Purple (A-B)');
+
+    if ptype == 'amp-freq':
+        fig, axes = pl.subplots(ncols=2,figsize=(9,3))
+        ax=0
+        for fld in np.unique(xdat.field):
+            xAA.where(xAA.field==fld).plot.scatter(x='chan',y='DMAG',  marker='.', color='r',alpha=0.1,ax=axes[ax])
+            xAB.where(xAB.field==fld).plot.scatter(x='chan',y='DMAG',  marker='.', color='m',alpha=0.1,ax=axes[ax])
+            xBB.where(xBB.field==fld).plot.scatter(x='chan',y='DMAG',  marker='.', color='b',alpha=0.1,ax=axes[ax])
+            axes[ax].set_title('Visibility Spectrum for field : '+ str(fld)) #+ '\nRed (A-A), Blue (B-B), Purple (A-B)')
+            ax = ax+1
+            
+    if ptype == 'uvcov':
+        fig, axes = pl.subplots(ncols=2,figsize=(9,4))
+        ant_dias = np.unique(gxdat.DISH_DIAMETER)
+        ax=0
+        for fld in np.unique(xdat.field):
+            xAB.where(xAB.field==fld).plot.scatter(x='U',y='V',  marker='.', color='m',ax=axes[ax])
+            xAB.where(xAB.field==fld).plot.scatter(x='-U',y='-V',  marker='.', color='m',ax=axes[ax])
+            xBB.where(xBB.field==fld).plot.scatter(x='U',y='V',  marker='.', color='b', ax=axes[ax])
+            xBB.where(xBB.field==fld).plot.scatter(x='-U',y='-V',  marker='.', color='b', ax=axes[ax])
+            xAA.where(xAA.field==fld).plot.scatter(x='U',y='V',  marker='.', color='r', ax=axes[ax])
+            xAA.where(xAA.field==fld).plot.scatter(x='-U',y='-V',  marker='.', color='r', ax=axes[ax])
+            axes[ax].set_title('UV coverage for field : '+str(fld))
+            ax=ax+1
+ 
+
+    if ptype == 'plotants':
+        if tel_name=='ALMA':
+            typeA = 'A'
+        else:
+            typeA = 'm'
+        fig, axes = pl.subplots(ncols=1,figsize=(6,5))
+        gxdat['ANT_XPOS'] = gxdat['POSITION'][:,0] - gxdat['POSITION'][:,0].mean()
+        gxdat['ANT_YPOS'] = gxdat['POSITION'][:,1] - gxdat['POSITION'][:,1].mean()
+        gxdat.plot.scatter(x='ANT_XPOS', y='ANT_YPOS',color='k',marker="1",s=200,linewidth=3.0)
+        
+        for i, txt in enumerate(ant_names):
+            col = ('b' if (txt.count(typeA)>0) else 'r')
+            pl.annotate('   '+txt, (gxdat['ANT_XPOS'].values[i], gxdat['ANT_YPOS'].values[i]),fontsize=12,color=col)   
+        pl.title('Antenna Positions')
+        
+    pl.tight_layout()
+
+def XPlot_old(vis='sim_data_ALMA.ms',ptype='amp-time',forceconvert=False):
+    """
+    Make a few types of plots
+    Supported types : amp-time, amp-freq, uvcov, plotants
+    forceconvert=True/False : Convert the input MS to a Zarr dataset and read it into an XArray for plotting. 
+                                               If set to False, it will skip the conversion step (and all the output messages the conversion produces). 
+    """
+    zvis = vis+'.zarr'
+    if not os.path.exists(zvis) or forceconvert==True:
+        msToZarr(vis=vis)
+        
+    xds = dio.read_vis(zvis)
+    xdat = xds.xds0
+    #gxdat = dio.read_vis(zvis,ddi='global')
+    gxdat = xds.ANTENNA
+    xdat['DMAG'] = ((xdat['DATA'].real ** 2 + xdat['DATA'].imag ** 2) ** 0.5).mean(axis=3)
+    xdat['U'] = xdat['UVW'][:,:,0]
+    xdat['V'] = xdat['UVW'][:,:,1]
+    xdat['-U'] = -xdat['UVW'][:,:,0]
+    xdat['-V'] = -xdat['UVW'][:,:,1]
+    
+    ant_dias = np.unique(gxdat.DISH_DIAMETER)
+
+    xAA = xdat.where( (gxdat.DISH_DIAMETER[xdat.antennas[:,0]] == ant_dias[0])  &  (gxdat.DISH_DIAMETER[xdat.antennas[:,1]] == ant_dias[0])  )
+    xBB = xdat.where(  (gxdat.DISH_DIAMETER[xdat.antennas[:,0]] == ant_dias[1])  &  (gxdat.DISH_DIAMETER[xdat.antennas[:,1]] == ant_dias[1])  )
+    xAB = xdat.where( ( (gxdat.DISH_DIAMETER[xdat.antennas[:,0]] == ant_dias[0])  &  (gxdat.DISH_DIAMETER[xdat.antennas[:,1]] == ant_dias[1]) | (gxdat.DISH_DIAMETER[xdat.antennas[:,0]] == ant_dias[1])  &  (gxdat.DISH_DIAMETER[xdat.antennas[:,1]] == ant_dias[0]) ) )
 
 
     if ptype == 'amp-time':
@@ -383,7 +471,7 @@ def XPlot(vis='sim_data_ALMA.ms',ptype='amp-time',forceconvert=False):
             
     if ptype == 'uvcov':
         fig, axes = pl.subplots(ncols=2,figsize=(9,4))
-        ant_dias = np.unique(gxdat.ANT_DISH_DIAMETER)
+        ant_dias = np.unique(gxdat.DISH_DIAMETER)
         ax=0
         for fld in np.unique(xdat.field):
             xAB.where(xAA.field==fld).plot.scatter(x='U',y='V',  marker='.', color='m',ax=axes[ax])
@@ -405,7 +493,7 @@ def XPlot(vis='sim_data_ALMA.ms',ptype='amp-time',forceconvert=False):
         gxdat['ANT_XPOS'] = gxdat['ANT_POSITION'][:,0] - gxdat['ANT_POSITION'][:,0].mean()
         gxdat['ANT_YPOS'] = gxdat['ANT_POSITION'][:,1] - gxdat['ANT_POSITION'][:,1].mean()
         gxdat.plot.scatter(x='ANT_XPOS', y='ANT_YPOS',color='k',marker="1",s=200,linewidth=3.0)
-        for i, txt in enumerate(gxdat.ANT_NAME.values):
+        for i, txt in enumerate(gxdat.NAME.values):
             col = ('b' if (txt.count(typeA)>0) else 'r')
             pl.annotate('   '+txt, (gxdat['ANT_XPOS'].values[i], gxdat['ANT_YPOS'].values[i]),fontsize=12,color=col)   
         pl.title('Antenna Positions');

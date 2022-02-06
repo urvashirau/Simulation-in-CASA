@@ -22,11 +22,13 @@ import pylab as pl
 import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
+import time
 
 
 # Import required tools/tasks
 from casatools import simulator, image, table, coordsys, measures, componentlist, quanta, ctsys, ms, vpmanager
-from casatasks import tclean, ft, imhead, listobs, exportfits, flagdata, bandpass, applycal,imstat, visstat,mstransform, imsmooth,widebandpbcor
+from casatasks import tclean, ft, imhead, listobs, exportfits, flagdata, bandpass, applycal
+from casatasks import casalog, imstat, visstat,mstransform, imsmooth,widebandpbcor
 from casatasks.private import simutil
 
 from IPython.display import Markdown as md
@@ -473,16 +475,44 @@ def evalCompList(clname='sim_onepoint.cl', imname='sim_onepoint_true.im'):
     cl.done()
 
 
-def smoothModel(imname='sim_jet_vla.im', rbeam='50.0arcsec'):
+def smoothModel(imname='sim_jet_vla.im',outimage='sim_jet_vla.im.smoothed', rbeam='100.0arcsec') : #_major='50.0arcsec',rbeam_minor='50.0arcsec',pa='0.0deg'):
+    """
+    Smooth an input truth image, with a set of restoring beams obtained from an imaging run.
+    The purpose is to generate smoothed 'truth' images that match the resolution of the reconstructed images.
+    """
     imsmooth(imagename=imname,
-             outfile=imname+'.smoothed',
+             outfile=outimage,
              kernel='gauss',
-             major=rbeam,
-             minor=rbeam,
+             major=rbeam,#   _major,
+             minor=rbeam,#   _minor,
              pa='0.0deg',
              targetres=True,
              overwrite=True)
 
+
+def smoothModel_new(imname='sim_jet_vla.im', rbeamfile=''):
+    """
+    Smooth an input truth image, with a set of restoring beams obtained from an imaging run.
+    The purpose is to generate smoothed 'truth' images that match the resolution of the reconstructed images.
+    """
+
+    rbeam =  np.load(rbeamfile,allow_pickle='TRUE').item()
+    
+    if 'beams' in rbeam:
+        option='cube'
+    else:
+        option='mfs'
+    
+    if option=='mfs':
+        
+        imsmooth(imagename=imname,
+                 outfile=imname+'.smoothed',
+                 beam=rbeam,
+                 targetres=True,
+                 overwrite=True)
+        
+    else:
+        print("Cube not supported yet")
 
 
 
@@ -570,14 +600,23 @@ def copyModelToData(msname='sim_data_ALMA.ms'):
 
 
 
-def addNoiseSim(msname='sim_data_ALMA.ms'):
+def addNoiseSim(msname='sim_data_ALMA.ms', noise=1.0):
     """
     ## Add Dish-size dependent noise - Use built in method
     """
     sm.openfromms(msname);
-    sm.setnoise(mode='tsys-atm');
+    sm.setnoise(mode='simplenoise',simplenoise=str(noise)+'Jy');
+    #sm.setnoise(mode='tsys-atm');
     sm.corrupt();   
     sm.close();
+
+#    #theoretical_rms 
+#    Use im.apparentsens
+#    tb.open(msname)
+#    shp = tb.getcol('DATA').shape
+#    tb.close()
+#    rms = noise / np.sqrt( shp[0] *2 )  # RMS noise per channel
+#    print("Expected image RMS (natural wt) : %3.3f"%(rms))
 
 
 def getFreqList(imname=''):
@@ -619,7 +658,7 @@ def fit_spectrum(cubename='', intensity='', alpha='', beta='', pixt=0.1):
     #print('Cube shape : ',shp)
 
     nu = np.array(getFreqList(cubename))/1e+9
-    print('Frequencies (Ghz) : ',nu)
+    ##print('Frequencies (Ghz) : ',nu)
     nu0 = (nu[0] + nu[len(nu)-1])/2.0
 
     alpha_arr = np.zeros((shp[0],shp[1],1,1),'float')
@@ -628,17 +667,28 @@ def fit_spectrum(cubename='', intensity='', alpha='', beta='', pixt=0.1):
 
     target_func = func_powerlaw
 
-    print("Start fitting...")
+    fcnt=0
+
+    #print("Start fitting...")
     for ii in range(0,shp[0]):
         for jj in range(0,shp[1]):
             if datpix[ii,jj,0,0] > pixt:
                 y = datpix[ii,jj,0,:]
-                popt, pcov = curve_fit(f=target_func, xdata={'nu':nu,'nu0':nu0}, ydata=y,p0=[1.0,0.0,0.0])
-                alpha_arr[ii,jj,0,0] = popt[1]
-                beta_arr[ii,jj,0,0] = popt[2]
-                int_arr[ii,jj,0,0] = popt[0]
+                try:
+                    popt, pcov = curve_fit(f=target_func, xdata={'nu':nu,'nu0':nu0}, ydata=y,p0=[1.0,0.0,0.0])
+                    alpha_arr[ii,jj,0,0] = popt[1]
+                    beta_arr[ii,jj,0,0] = popt[2]
+                    int_arr[ii,jj,0,0] = popt[0]
+                except:
+                    alpha_arr[ii,jj,0,0] = np.nan
+                    beta_arr[ii,jj,0,0] = np.nan
+                    int_arr[ii,jj,0,0] = np.nan
+                    fcnt = fcnt+1
+                    
+    if fcnt>0:
+        print("%d pixel(s) had failed spectral fit(s)"%(fcnt))
             
-    pl.figure(figsize=(12,7))
+    pl.figure(figsize=(10,3))
     pl.clf()
     pl.subplot(131)
     pl.imshow(int_arr[:,:,0,0].transpose(),origin='lower')     
@@ -647,20 +697,40 @@ def fit_spectrum(cubename='', intensity='', alpha='', beta='', pixt=0.1):
     pl.subplot(133)
     pl.imshow(beta_arr[:,:,0,0].transpose(),origin='lower',cmap='jet',vmin=-0.2, vmax=0.5)     
 
-    print("Save outputs")
+    #print("Save outputs")
     ia.fromarray(outfile=intensity, pixels=int_arr, csys=csys.torecord(),overwrite=True)
     ia.fromarray(outfile=alpha, pixels=alpha_arr, csys=csys.torecord(),overwrite=True)
     ia.fromarray(outfile=beta, pixels=beta_arr, csys=csys.torecord(),overwrite=True)
 
+    pl.show()
+
 ###################################################################################
 
 
-def calcImageAccuracy( truthimage='', outputimage=''):
+def calcImageAccuracy( truthimage='', outputimage='', weightimage='', doplot='int'):
     '''
     Calculate image fidelity metrics to compare truth and reconstructed images
 
-    truthimage : Model image convolved with a beam that represents the desired target resolution.
-    outputimage : Restored image, convolved to the same target resoution as truthimage.
+    truthimage "M" : Model image convolved with a beam that represents the desired target resolution.
+    outputimage "I" : Restored image, convolved to the same target resoution as truthimage.
+    weightimage "B" : An image to use to indicate weight per pixel. 
+                                  If empty string, calculate as B=max( |I|, |M| ).  Use this for intensity images
+                                  If supplied, use the input image (say, the 'int' image), to be used for spectral index comparisons. 
+    doplot : 'int' = show relative diff.  'alpha' = show absolute diff.  None : no plots.
+    
+    Metrics : 
+
+    (1) Chi-square 
+              Fa = sqrt ( mean ( (I - M)^2)
+
+    (2) Image Fidelity (F3 from NGVLA Memo 67, Eqn 10))
+              Fb = 1 -  sum( B W |M - I|) / sum ( B^2  W )
+              where W is a window function to guard against mosaic edges. 
+                          B = max( |I|, |M| ) per pixel is a way to give increased weight to off-source pixels with significant differences. 
+
+               *** modified to have only one 'B' in the denominator, because as written above it was not sensitive enough *** 
+               *** For intensity, use the above definition of B. For spectral index, use the Truth 'int' image as the B .
+
     '''
 
     ia.open(truthimage)
@@ -668,7 +738,23 @@ def calcImageAccuracy( truthimage='', outputimage=''):
     ia.close()
     #print("Shape:"+str(shp))
 
-    for chan in range(0,1): ## shp[3]):
+    chisq_spec = []
+    fid_spec = []
+
+    nchan = shp[3]
+
+    if doplot=='int':
+        print("(Truth - Output)/max(Truth_0)")
+    else:
+        print("(Truth - Output)")
+
+    if doplot != None:
+        pl.figure(figsize=(nchan*5,3))
+        pl.clf()
+
+    tmax=None  # max pixel amp in the first channel.
+
+    for chan in range(0, shp[3]):
         ia.open(truthimage)
         imtrue = ia.getchunk(blc=[0,0,0,chan],trc=[shp[0],shp[1],0,chan])
         ia.close()
@@ -676,20 +762,197 @@ def calcImageAccuracy( truthimage='', outputimage=''):
         imout = ia.getchunk(blc=[0,0,0,chan],trc=[shp[0],shp[1],0,chan])
         ia.close()
 
-        tmax = np.max(imtrue)
+        if weightimage=='':
+            bwt = np.maximum( np.fabs( imtrue) , np.fabs( imout ) )
+        else:
+            ia.open(weightimage)
+            bwt = ia.getchunk(blc=[0,0,0,chan],trc=[shp[0],shp[1],0,chan])
+            ia.close()
+            
 
-        ## Relative Error. This is also the inverse of the formal definition of "imaging fidelity"
-        imdiff = (imtrue - imout)/tmax
+        ## Calculate a mask for all pixels with weight == 0.  ( To avoid div by zero )
+        bwt[bwt==0] = np.nan
+        imtrue[np.isnan(bwt)] = np.nan
+        imout[np.isnan(bwt)] = np.nan
 
-        ## Chi-square
-        chisq = np.sqrt(np.mean((imtrue - imout)**2))
+        # Guard against all pixels masked
+        if np.nansum(bwt)==0:
+            print("No pixels left for chan "+str(chan))
+            continue
         
+        ## Chi-square
+        chisq = np.sqrt(np.nanmean((imtrue - imout)**2))
 
-        pl.figure(figsize=(4,4))
-        pl.clf()
-        pl.subplot(111)
-        pl.imshow(imdiff[:,:,0,0].transpose(),origin='lower',interpolation=None,cmap='jet')#,vmin=-0.005, vmax=+0.005)     
+        ## F3 Fidelity
+        fid = 1.0 - np.nansum( bwt * np.fabs( imtrue - imout)  ) / np.nansum( bwt ) ##* bwt )
+
+        #print("[chan %d] chisq = %3.6f, \tfid = %3.6f."%(chan, chisq,fid))
+
+        ## Display.... 
+
+        if doplot=='int':
+            ## Calculate a relative error image for display
+            if tmax==None:
+                tmax = np.nanmax(imtrue)   # Calc tmax only for the first channel
+            ## Relative Error. This is also the inverse of the formal definition of "imaging fidelity"
+            imdiff = (imtrue - imout)/tmax
+        if doplot=='alpha':
+            imdiff = imtrue - imout
+
+        if doplot != None:
+            pl.subplot(1,nchan, chan+1)
+            if doplot=='int':
+                pl.imshow(imdiff[:,:,0,0].transpose(),origin='lower',interpolation=None,cmap='jet')#,vmin=-0.005, vmax=+0.005)     
+            if doplot=='alpha':
+                pl.imshow(imdiff[:,:,0,0].transpose(),origin='lower',interpolation=None,cmap='jet',vmin=-0.4, vmax=+0.4)     
+            pl.colorbar()
+            #pl.title('Relative Difference between\n true and output images')
+
+        chisq_spec.append(chisq)
+        fid_spec.append(fid)
+
+    pl.show()
+
+#    print("Chi-Square : " + str(chisq_spec)  )
+#    print("Image Fidelity : " + str(fid_spec) )
+
+    cstr = "Chi-Square : "
+    fstr = "Image Fidelity : "
+    for ch in range(len(chisq_spec)):
+        cstr = cstr + "%3.3f\t"%(chisq_spec[ch])
+        fstr = fstr + "%3.3f\t"%(fid_spec[ch])
+
+    print(cstr)
+    print(fstr)
+
+    return chisq_spec, fid_spec
+
+
+
+def showCube(imagename='',maskname=''):
+
+    ia.open(imagename)
+    shp = ia.shape()
+    ia.close()
+    nchan = shp[3]
+
+    print("Channels from "+imagename)
+
+    pl.figure(figsize=(nchan*5,3))
+    pl.clf()
+
+    for chan in range(0, shp[3]):
+        ia.open(imagename)
+        impix = ia.getchunk(blc=[0,0,0,chan],trc=[shp[0],shp[1],0,chan])
+        ia.close()
+
+        if maskname != '':
+            ia.open(maskname)
+            maskpix = ia.getchunk(blc=[0,0,0,chan],trc=[shp[0],shp[1],0,chan])
+            ia.close()
+        
+        pl.subplot(1,nchan, chan+1)
+        pl.imshow(impix[:,:,0,0].transpose(),origin='lower',interpolation=None,cmap='jet')#,vmin=-0.005, vmax=+0.005)     
+
+        if maskname !='':
+            if np.sum(maskpix) > 0.0 and np.sum(maskpix)<shp[0]*shp[1]:
+                pl.contour(maskpix[:,:,0,0].transpose(),colors='m')
+
         pl.colorbar()
-        pl.title('Relative Difference between\n true and output images')
 
-        print("Standard deviation of diff (chan %d) = %3.6f."%(chan, chisq))
+    pl.show()
+
+
+def calcResRMS(resname=''):
+        istat = imstat(resname,axes=[0,1,2])  ### Make this calc within the PB.
+        rres = istat['rms']  ### for all channels.  For first, pick [0]
+
+        print("RMS spectrum : "+str(rres))
+
+        return rres
+
+def inspectResults(imagename='', truthname='', maskthreshold=0.1):
+    ''' 
+    Display Restored and Residual images per channel
+    Calculate residual rms, per channel
+    Smooth the input image.
+    Display diff of truth image and restored image
+    Calculate chisq and image fidelity from restored image and true image, per channel
+    Calculate spectral index (and curvature)
+    Display fitted int, alpha, beta
+    Calculate chisq and image fidelity for spectral index (and curvature)
+    Display convergence plot and runtime. 
+    '''
+    
+    print("\n-----------------------------------------------------------------------")
+    print("Restored and Residual Images and RMS")
+    print("-----------------------------------------------------------------------")
+    ## Display Residual images per channel
+    showCube(imagename+'.image', imagename+'.mask')
+    showCube(imagename+'.residual')
+    ## Calculate residual rms, per channel
+    rms_spec = calcResRMS(imagename+'.residual')
+
+    print("\n-----------------------------------------------------------------------")
+    print("Chisq and Image Fidelity")
+    print("-----------------------------------------------------------------------")
+    ##Smooth the input image ( hard-code target resolution )
+    imsmooth(imagename=imagename+'.image',
+             outfile=imagename+'.cube',
+             major='100.0arcsec',minor='100.0arcsec',pa='0.0deg',
+             targetres=True,overwrite=True)
+
+
+    ## Display diff of truth image and restored image
+    ## Calculate chisq and image fidelity from restored image and true image, per channel
+    chisq_spec, fid_spec = calcImageAccuracy(truthimage=truthname+'.cube', 
+                                             outputimage=imagename+'.cube')
+    
+    print("\n----------------------------------------------------------------------")
+    print("Fitted continuum intensity, spectral index and curvature")
+    print("----------------------------------------------------------------------")
+
+    ## Calculate spectral index (and curvature)
+    ## Display fitted int, alpha, beta
+    fit_spectrum(cubename=imagename+'.cube',
+                 intensity=imagename+'.cont',
+                 alpha=imagename+'.alpha',
+                 beta=imagename+'.beta',
+                 pixt=maskthreshold)
+
+    ## Calculate chisq and image fidelity for spectral index (and curvature)
+    chisq_alpha , fid_alpha = calcImageAccuracy(truthimage=truthname+'.alpha', 
+                                                outputimage=imagename+'.alpha',
+                                                weightimage=imagename+'.cont',
+                                                doplot='alpha')
+
+    print("\n----------------------------------------------------------------------")
+    print("Convergence Plots : Peak Residual and Model Flux")
+    print("----------------------------------------------------------------------")
+    ## Display convergence plot and runtime. 
+    PlotConvergence(imagename+'.summary.npy')
+
+    ## Read the runtime out...
+    summ = np.load(imagename+'.summary.npy',allow_pickle='TRUE').item()
+    if 'runtime' in summ:
+        rtime = summ['runtime']
+    else:
+        rtime = -1.0
+
+
+    #### Gather results into a dictionary on disk.
+    results = {}
+    results['returndict'] = imagename+'.summary.npy'  ## tclean return dictionary
+    results['rms_spec'] = rms_spec
+    results['chisq_spec'] = chisq_spec
+    results['fid_spec'] = fid_spec
+    results['chisq_alpha'] = chisq_alpha
+    results['fid_alpha'] = fid_alpha
+    results['runtime'] = rtime
+    results['iterdone'] = summ['iterdone']
+    results['nmajordone'] = summ['nmajordone']
+
+    return results
+
+
+    

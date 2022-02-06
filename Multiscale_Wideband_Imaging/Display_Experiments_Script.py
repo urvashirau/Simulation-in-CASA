@@ -443,7 +443,7 @@ def PlotConvergence(recfile=''):
     ## A list of iteration numbers at which major cycles happened.  
     majcycle = summ['summarymajor']
     
-    pl.figure(figsize=(9,4))
+    pl.figure(figsize=(9,3))
     pl.clf()
     ax1 = pl.subplot(121)
     pl.title('Peak Residual')
@@ -464,3 +464,318 @@ def PlotConvergence(recfile=''):
         for it in majcycle:
             ax2.vlines(x=[it,it], ymin=0, ymax=np.max(sel_fluxes),linestyles='dashed')
 
+    if 'runtime' in summ:
+        print("Total Runtime : %2.2f"%(summ['runtime']))
+    else:
+        print("Total Runtime : Unknown")
+
+#############################################
+### New Plots from the tclean return dictionary, after CAS-6692
+### Docs : https://casadocs.readthedocs.io/en/cas-6692/notebooks/synthesis_imaging.html#Returned-Dictionary
+###
+### Notes
+###     polarity -> stokes  (to match the tclean input parameter that decides this axis)
+###     docs say :  ( sumMin.keys() ).  Maybe say.....  ret = tclean(....), sumMin=ret['summaryminor']
+###     sumMin vs summMin ?? This is only in the live instance of  the return dict. Not after pickling. 
+###          -- check with FMP if this is to be allowed ? 
+###     mapperid : deconvolver id, for multi-field imaging. 
+#############################################
+def PlotConvergence_New(recfile=''):
+    
+    summ = np.load(recfile,allow_pickle='TRUE').item()
+
+    #return (summ['summaryminor'])
+
+    summ_minor = summ['summaryminor']
+
+    pl.figure(figsize=(9,3))
+    pl.clf()
+    ax1 = pl.subplot(121)
+    pl.title('Peak Residual')
+    ax2 = pl.subplot(122)
+    pl.title('Total Flux')
+
+    for chan in summ_minor.keys():
+        for pol in summ_minor[chan].keys():
+            #print("Plot for channel %d and stokes %d"%(chan,pol))
+            rec1 = summ_minor[chan][pol]
+        
+            ## Set the first element to the start
+            iters=[] #rec1['startIterDone'][0]]
+            peakres=[] #[rec1['startPeakRes'][0]]
+            modflux=[] #[rec1['startModFlux'][0]]
+        
+            start_iter=0
+            for i in range(len(rec1['iterDone'])):  ## Number of sets of minor cycles
+                iters.append(start_iter)          # itercount at start
+                iters.append(start_iter + rec1['iterDone'][i])   # itercount at end
+                start_iter = start_iter + rec1['iterDone'][i]  # Update the starting point....
+                peakres.append(rec1['startPeakRes'][i])  # peakres at start
+                peakres.append(rec1['peakRes'][i])          # peakres at end
+                modflux.append(rec1['startModelFlux'][i])  # flux at start
+                modflux.append(rec1['modelFlux'][i])          # flux at end
+            
+            ax1.plot(iters, peakres,'r.-')
+            ax2.plot(iters, modflux,'b.-')
+
+    return summ_minor
+
+
+def flatzip(lista, listb):
+    """flatzip([0,2,4],[1,3,5]) => [0,1,2,3,4,5]"""
+    ret = []
+    for pair in zip(lista,listb):
+        ret.append(pair[0])
+        ret.append(pair[1])
+    return ret
+
+def PlotConvergence_Ben(recfile=''):
+    
+    summ = np.load(recfile,allow_pickle='TRUE').item()
+
+    from casatasks.private.imagerhelpers.imager_base import PySynthesisImager
+    colors = ['maroon','red','salmon','orange','yellowgreen','green','darkgreen','skyblue','blue','indigo']
+
+    summary_plain = summ['summaryminor']
+    summary =summary_plain
+    
+    ## Channel / Stokes IDs. The indexing may get messy with both dimensions turned on, but for channel, it will work right now. 
+    chan_ids = list(summary.keys())
+    chan0 = chan_ids[0]
+    pol_ids = list(summary[chan0].keys())
+    pol0 = pol_ids[0]
+    ## A list of iteration numbers at which major cycles happened.
+    majcycle = summary[chan0][pol0]["cycleStartIters"]
+    nmaj = len(majcycle)
+
+    # Selection style options:
+    # 'cummul': absolute/cummulative iterations
+    # 'percyc': iterations per major cycle    
+    # 'majcyc': absolute/cummulative iterations, but according to majcycle
+    style='percyc'
+    condensed=True
+
+    # Update the list of major cycles based on the largest iterDone per cycle (to condense the graph in the x dimension)
+    if condensed:
+        cummulativeIterdone = 0
+        for cycle in range(nmaj):
+            maxCycleIterdone = 0
+            for chan_id in chan_ids:
+                maxCycleIterdone = max(maxCycleIterdone, summary_plain[chan_id][pol0]["iterDone"][cycle])
+            majcycle[cycle] = maxCycleIterdone + cummulativeIterdone
+            cummulativeIterdone += maxCycleIterdone
+
+    pl.figure(figsize=(14,14))
+    pl.clf()
+    for chan_idx in range(len(chan_ids)):
+        chan_id = chan_ids[chan_idx]
+        color = colors[chan_idx%len(colors)]
+        maj_sel_iters = flatzip( majcycle, majcycle )
+        
+        start_iters   = np.array( summary_plain[chan_id][pol0]["iterDone"] )
+        sel_iters     = flatzip( majcycle, start_iters )
+        iters_done    = np.array( summary[chan_id][pol0]["iterDone"] )
+        new_sel_iters = flatzip( majcycle, (iters_done + majcycle).tolist() )
+
+        sel_fluxes    = flatzip( summary[chan_id][pol0]["startModelFlux"], summary[chan_id][pol0]["modelFlux"]   )
+        sel_peaks     = flatzip( summary[chan_id][pol0]["startPeakRes"],   summary[chan_id][pol0]["peakRes"]     )
+        sel_cycthresh = flatzip( summary[chan_id][pol0]["cycleThresh"],    summary[chan_id][pol0]["cycleThresh"] )
+
+        #print "Chan : " + str(plane_id)
+        #print new_sel_iters
+        #print maj_sel_iters
+        #print sel_cycthresh
+
+        if style=='cummul':
+            plot_iters = sel_iters
+        if style=='percyc':
+            plot_iters = new_sel_iters
+        if style=='majcyc':
+            plot_iters = maj_sel_iters
+
+        pl.subplot(211)
+        pl.plot(plot_iters, sel_peaks,'o-',color=color)
+        pl.plot(plot_iters, sel_cycthresh,'c--')
+        for it in majcycle:
+            pl.vlines(x=[it,it], ymin=0, ymax=np.max(sel_peaks),linestyles='dashed')
+        pl.title('Peak residual')
+        pl.xlabel("Iteration count" if condensed else "Total iteration count")
+
+        pl.subplot(212)
+        pl.plot(plot_iters, sel_fluxes,'o-',color=color)
+        for it in majcycle:
+            pl.vlines(x=[it,it], ymin=0, ymax=np.max(sel_fluxes),linestyles='dashed')
+        pl.title('Total flux')
+        pl.xlabel("Iteration count" if condensed else "Total iteration count")
+
+    ##########################################################
+    
+    # major cycle + minor cycle overview plot values
+    chanmax = chan_ids[-1]+1
+    cross_peaks = np.zeros( ( chanmax, nmaj ) )
+    cross_fluxes = np.zeros( ( chanmax, nmaj ) )
+    cross_cycthresh = np.array( summary[chan0][pol0]["cycleThresh"] )
+    for chan_id in chan_ids:
+        cross_peaks[chan_id]  = np.array( summary[chan_id][pol0]["peakRes"] )
+        cross_fluxes[chan_id] = np.array( summary[chan_id][pol0]["modelFlux"] )
+
+    #print cross_peaks
+    pl.figure(figsize=(14,14))
+    pl.clf()
+
+#        print("SHAPES")
+#        print(nmaj) ## exists now.... ( label or coordinate )
+#        print(cross_peaks.shape)
+
+    maxval_peaks  = np.max(cross_peaks)
+    maxval_fluxes  = np.max(cross_fluxes)
+    minmaj = majcycle[0] 
+    maxmaj = majcycle[nmaj-1]
+    minmaj = minmaj - 0.01*(maxmaj-minmaj)
+    maxmaj = maxmaj + 0.1*(maxmaj-minmaj)
+    for maj_idx in range(nmaj):
+        color = colors[maj_idx%len(colors)]
+
+        ## Spectrum of peak residual, evolving with time
+        pl.subplot(222)
+        pl.plot(range(chanmax), cross_peaks[:,maj_idx], 'o-',color=color)
+        pl.ylim(0.0, maxval_peaks)
+        pl.title("Spectrum of peak residual")
+        pl.xlabel("Channel Id")
+
+        ## Spectrum of total flux, evolving with time
+        pl.subplot(224)
+        pl.plot(range(chanmax), cross_fluxes[:,maj_idx], 'o-',color=color)
+        pl.ylim(0.0, maxval_fluxes)
+        pl.title("Spectrum of peak flux")
+        pl.xlabel("Channel Id")
+
+        ## Peak residual changing with iterations (for all channels)
+        pl.subplot(221)
+        pl.cla()
+        pl.xlim(minmaj, maxmaj)
+        for ch in range(chanmax):
+            pl.plot(majcycle[0:maj_idx+1], cross_peaks[ch,0:maj_idx+1],'o-',color=color)
+        for it in majcycle[0:maj_idx+1]:
+            pl.vlines(x=[it,it], ymin=0, ymax=maxval_peaks,linestyles='dashed')
+        for it in range(maj_idx+1): #majcycle[0:maj_idx+1]:
+            if it==0:
+                xmin=0
+            else:
+                xmin=majcycle[it-1]
+            xmax = majcycle[it]
+            pl.hlines(y=cross_cycthresh[it], xmin=xmin, xmax=xmax, linestyles='dashed', color='skyblue')
+        pl.title('Peak residual')
+        pl.xlabel("Total iteration count")
+
+        ## Total flux changing with iterations (for all channels)
+        pl.subplot(223)
+        pl.cla()
+        pl.xlim(minmaj, maxmaj)
+        for ch in range(chanmax):
+            pl.plot(majcycle[0:maj_idx+1], cross_fluxes[ch,0:maj_idx+1],'o-',color=color)
+        for it in majcycle[0:maj_idx+1]:
+            pl.vlines(x=[it,it], ymin=0, ymax=maxval_fluxes,linestyles='dashed')
+        pl.title('Total flux')
+        pl.xlabel("Total iteration count")
+
+        print("Major cycle at iteration : " + str(majcycle[maj_idx]))
+        pl.pause(0.5)
+
+    ##########################################################
+    #print cross_peaks
+    fig =  pl.figure(figsize=(14,8))
+ 
+
+    ax = fig.add_subplot(121, projection='3d')
+    x = range(chanmax)
+    y = range(nmaj)
+    X, Y = np.meshgrid(x, y)
+
+    ax.plot_surface(X, Y, cross_peaks.transpose())
+    
+    ax.set_xlabel('Channel')
+    ax.set_ylabel('Major Cycle')
+    ax.set_zlabel('Peak Residual')
+
+    ax = fig.add_subplot(122, projection='3d')
+    x = range(chanmax)
+    y = range(nmaj)
+    X, Y = np.meshgrid(x, y)
+
+    ax.plot_surface(X, Y, cross_fluxes.transpose(),antialiased=False)
+    
+    ax.set_xlabel('Channel')
+    ax.set_ylabel('Major Cycle')
+    ax.set_zlabel('Total flux')
+
+    pl.figure(figsize=(14,14))
+ 
+    pl.subplot(211)
+    pl.imshow(cross_fluxes)
+    pl.subplot(212)
+    pl.imshow(cross_peaks)
+
+
+
+def compareResults(all_results={}):
+
+    ## Compare across channels
+    pl.figure(figsize=(14,3))
+    pl.clf()
+    ax1 = pl.subplot(131)
+    pl.title('Image Chi-Sq spectrum')
+    pl.xlabel('channel')
+    ax2 = pl.subplot(132)
+    pl.title('Image Fidelity spectrum')
+    pl.xlabel('channel')
+    ax3 = pl.subplot(133)
+    pl.title('Residual RMS spectrum')
+    pl.xlabel('channel')
+    
+    for algo in all_results.keys():
+        ax1.plot(all_results[algo]['chisq_spec'],'o-',label=algo)
+        ax2.plot(all_results[algo]['fid_spec'],'o-',label=algo)
+        ax3.plot(all_results[algo]['rms_spec'],'o-',label=algo)
+        
+    ax1.legend()
+#    ax2.legend()
+#    ax3.legend()
+
+    pl.show()
+
+    ## Chi-sq and fid for alpha, and then runtime. 
+    
+    pl.figure(figsize=(14,3))
+    pl.clf()
+    ax1 = pl.subplot(151)
+    pl.title('Chi-Sq for Alpha')
+    pl.xlabel('algo')
+    ax2 = pl.subplot(152)
+    pl.title('Image Fidelity for Alpha')
+    pl.xlabel('algo')
+    ax3 = pl.subplot(153)
+    pl.title('Runtime')
+    pl.xlabel('algo')
+    ax4 = pl.subplot(154)
+    pl.title('iterdone')
+    pl.xlabel('algo')
+    ax5 = pl.subplot(155)
+    pl.title('n major cycles')
+    pl.xlabel('algo')
+    
+    al = 1
+    for algo in all_results.keys():
+        ax1.bar(al, all_results[algo]['chisq_alpha'],0.2,label=algo)
+        ax2.bar(al, all_results[algo]['fid_alpha'],0.2,label=algo)
+        ax3.bar(al, all_results[algo]['runtime'],0.2,label=algo)
+        ax4.bar(al, all_results[algo]['iterdone'],0.2,label=algo)
+        ax5.bar(al, all_results[algo]['nmajordone'],0.2,label=algo)
+        al = al+0.4
+
+    #ax1.legend()
+#    ax2.legend()
+#    ax3.legend()
+
+    pl.tight_layout()
+    pl.show()
